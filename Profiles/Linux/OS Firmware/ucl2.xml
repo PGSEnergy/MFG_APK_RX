@@ -1,0 +1,122 @@
+<!--
+* Copyright (C) 2012, Freescale Semiconductor, Inc. All Rights Reserved.
+* The CFG element contains a list of recognized usb devices.
+*  DEV elements provide a name, class, vid and pid for each device.
+*
+* Each LIST element contains a list of update instructions.
+*  "Install" - Erase media and install firmware.
+*  "Update" - Update firmware only.
+*
+* Each CMD element contains one update instruction of attribute type.
+*  "pull" - Does UtpRead(body, file) transaction.
+*  "push" - Does UtpWrite(body, file) transaction.
+*  "drop" - Does UtpCommand(body) then waits for device to disconnect.
+*  "boot" - Finds configured device, forces it to "body" device and downloads "file".
+*  "find" - Waits for "timeout" seconds for the "body" device to connect.
+*  "show" - Parse and show device info in "file".
+-->
+
+
+<UCL>
+  <CFG>
+    <STATE name="BootStrap" dev="MX6SL" vid="15A2" pid="0063"/>
+    <STATE name="BootStrap" dev="MX6D" vid="15A2" pid="0061"/>
+    <STATE name="BootStrap" dev="MX6Q" vid="15A2" pid="0054"/>
+    <STATE name="BootStrap" dev="MX6SX" vid="15A2" pid="0071"/>
+    <STATE name="BootStrap" dev="MX6UL" vid="15A2" pid="007D"/>
+    <STATE name="BootStrap" dev="MX7D" vid="15A2" pid="0076"/>
+    <STATE name="BootStrap" dev="MX6ULL" vid="15A2" pid="0080"/>
+    <STATE name="Updater"   dev="MSC" vid="066F" pid="37FF"/>
+  </CFG>
+
+    
+  <LIST name="AllToEmmcRootfsTar" desc="Bootloaders, kernel and File system where FS is a tar file">
+    <CMD state="BootStrap" type="boot" body="BootStrap" file ="firmware/u-boot-%board%.imx">Loading U-boot</CMD>
+
+    <CMD state="BootStrap" type="load" file="firmware/zImage-%board%" address="0x80800000"
+      loadSection="OTH" setSection="OTH" HasFlashHeader="FALSE" ifdev="MX6UL MX6SX">Loading Kernel.</CMD>
+    <CMD state="BootStrap" type="load" file="firmware/zImage-%board%" address="0x12000000"
+      loadSection="OTH" setSection="OTH" HasFlashHeader="FALSE" ifdev="MX6Q">Loading Kernel.</CMD>
+
+    <CMD state="BootStrap" type="load" file="firmware/fsl-image-mfgtool-initramfs-imx_mfgtools.cpio.gz.u-boot" address="0x83800000"
+      loadSection="OTH" setSection="OTH" HasFlashHeader="FALSE" ifdev="MX6UL MX6SX">Loading Initramfs.</CMD>
+    <CMD state="BootStrap" type="load" file="firmware/fsl-image-mfgtool-initramfs-imx_mfgtools.cpio.gz.u-boot" address="0x12C00000"
+      loadSection="OTH" setSection="OTH" HasFlashHeader="FALSE" ifdev="MX6Q">Loading Initramfs.</CMD>
+
+    <CMD state="BootStrap" type="load" file="firmware/%board%-%dtb%.dtb" address="0x83000000"
+      loadSection="OTH" setSection="OTH" HasFlashHeader="FALSE" ifdev="MX6UL MX6SX">Loading device tree.</CMD>
+    <CMD state="BootStrap" type="load" file="firmware/%board%-%dtb%.dtb" address="0x18000000"
+      loadSection="OTH" setSection="OTH" HasFlashHeader="FALSE" ifdev="MX6Q">Loading device tree.</CMD>
+
+    <CMD state="BootStrap" type="jump" > Jumping to OS image. </CMD>
+
+    <!-- create partition -->
+    <CMD state="Updater" type="push" body="send" file="mksdcard.sh.tar">Sending partition shell</CMD>
+    <CMD state="Updater" type="push" body="$ tar xf $FILE "> Partitioning...</CMD>
+    <CMD state="Updater" type="push" body="$ sh mksdcard.sh /dev/mmcblk%mmc%"> Partitioning...</CMD>
+
+
+    <!-- ########### -->
+    <!-- Bootloaders -->
+    <!-- ########### -->
+
+    <CMD state="Updater" type="push" body="$ dd if=/dev/zero of=/dev/mmcblk%mmc% bs=1k seek=384 conv=fsync count=129">clear u-boot arg</CMD>
+
+    <CMD state="Updater" type="push" body="$ echo 0 > /sys/block/mmcblk%mmc%boot0/force_ro">access boot partition 1</CMD>
+    <CMD state="Updater" type="push" body="send" file="files/SPL-%board%">Sending SPL</CMD>
+    <CMD state="Updater" type="push" body="$ dd if=$FILE of=/dev/mmcblk%mmc%boot0 bs=512 seek=2">write SPL to eMMC</CMD>
+
+    <CMD state="Updater" type="push" body="send" file="files/u-boot.img">Sending u-boot.img</CMD>
+    <CMD state="Updater" type="push" body="$ dd if=$FILE of=/dev/mmcblk%mmc%boot0 bs=512 seek=138">write u-boot.img to eMMC</CMD>
+    <CMD state="Updater" type="push" body="$ echo 1 > /sys/block/mmcblk%mmc%boot0/force_ro">re-enable read-only access</CMD>
+    <CMD state="Updater" type="push" body="$ mmc bootpart enable 1 1 /dev/mmcblk%mmc%">enable boot partion 1 to boot</CMD>
+    <CMD state="Updater" type="push" body="$ while [ ! -e /dev/mmcblk%mmc%p1 ]; do sleep 1; echo \"waiting...\"; done ">Waiting for the partition ready</CMD>
+
+    <!-- ########### -->
+    <!--    Kernel   -->
+    <!-- ########### -->
+
+    <!-- create fat partition -->
+    <CMD state="Updater" type="push" body="$ mkfs.vfat /dev/mmcblk%mmc%p1">Formatting rootfs partition</CMD>
+    <CMD state="Updater" type="push" body="$ mkdir -p /mnt/mmcblk%mmc%p1"/>
+    <CMD state="Updater" type="push" body="$ mount -t vfat /dev/mmcblk%mmc%p1 /mnt/mmcblk%mmc%p1"/>
+
+    <!-- burn kernel -->
+    <CMD state="Updater" type="push" body="send" file="files/zImage">Sending kernel zImage</CMD>
+    <CMD state="Updater" type="push" body="$ cp $FILE /mnt/mmcblk%mmc%p1/zImage">write kernel image to sd card</CMD>
+    
+    <!-- ###burn KEPM applications### -->
+    <CMD state="Updater" type="push" body="send" file="files/M4ERPC.bin">Sending M4 application</CMD>
+    <CMD state="Updater" type="push" body="$ cp $FILE /mnt/mmcblk%mmc%p1/M4ERPC.bin">write M4 application</CMD>
+
+
+
+    <!-- burn dtb -->
+    <!--<CMD state="Updater" type="push" body="send" file="files/%board%-%dtb%_v2.dtb">Sending DTB</CMD>
+    <CMD state="Updater" type="push" body="$ cp $FILE /mnt/mmcblk%mmc%p1/%board%-%dtb%_v2.dtb">write DTB</CMD>-->
+    <CMD state="Updater" type="push" body="send" file="files/%board%-%dtb%_v2-m4.dtb">Sending DTB</CMD>
+    <CMD state="Updater" type="push" body="$ cp $FILE /mnt/mmcblk%mmc%p1/%board%-%dtb%_v2-m4.dtb">write DTB</CMD>    
+    
+    <!-- Add bootscript -->
+    <CMD state="Updater" type="push" body="send" file="files/boot.scr">Sending bootscript</CMD>
+    <CMD state="Updater" type="push" body="$ cp $FILE /mnt/mmcblk%mmc%p1/boot.scr">write bootscript</CMD>
+
+    <CMD state="Updater" type="push" body="$ umount /mnt/mmcblk%mmc%p1">Unmounting vfat partition</CMD>
+
+    <!-- ########### -->
+    <!--   Root FS   -->
+    <!-- ########### -->
+
+    <!-- burn rootfs -->
+    <CMD state="Updater" type="push" body="$ mkfs.ext3 -F -j /dev/mmcblk%mmc%p2">Formatting rootfs partition</CMD>
+    <CMD state="Updater" type="push" body="$ mkdir -p /mnt/mmcblk%mmc%p2"/>
+    <CMD state="Updater" type="push" body="$ mount -t ext3 /dev/mmcblk%mmc%p2 /mnt/mmcblk%mmc%p2"/>
+    <CMD state="Updater" type="push" body="pipe tar -jx -C /mnt/mmcblk%mmc%p2" file="files/%rootfs%-%board%.tar.bz2">Sending and writing rootfs</CMD>
+    <CMD state="Updater" type="push" body="frf">Finishing rootfs write</CMD>
+  
+    <CMD state="Updater" type="push" body="$ umount /mnt/mmcblk%mmc%p2">Unmounting rootfs partition</CMD>
+
+    <CMD state="Updater" type="push" body="$ echo Update Complete!">Done</CMD>
+  </LIST>
+  
+</UCL>
